@@ -55,7 +55,7 @@ jobs:
       - name: Build Solana Program
         run: |
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          cargo build-sbf --features=test-owner
+          cargo build-sbf
 
       - name: Run Rust Tests
         run: cargo test -- --nocapture
