@@ -51,7 +51,7 @@ pub struct ProposalState {
 }
 
 impl ProposalState {
-    pub const LEN: usize = size_of::<Self>();
+    pub const LEN: usize = 32 + 8 + 1 + 1 + 1 + 8 + 1;
 
     pub const SEED: &'static [u8] = b"proposal";
 
