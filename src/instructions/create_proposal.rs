@@ -1,6 +1,9 @@
-use crate::state::{
-    multisig::MultisigState,
-    proposal::{self, ProposalState, ProposalStatus},
+use crate::{
+    helper::create_pda_account,
+    state::{
+        multisig::MultisigState,
+        proposal::{self, ProposalState, ProposalStatus},
+    },
 };
 use pinocchio::{
     account_info::AccountInfo,
@@ -13,8 +16,7 @@ use pinocchio::{
 };
 
 pub fn process_create_proposal_instruction(accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    let [creator, proposal_account, multisig_account, rent_sysvar_acc, _remaining @ ..] = accounts
-    else {
+    let [creator, proposal_account, multisig_account, rent, _remaining @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -39,38 +41,34 @@ pub fn process_create_proposal_instruction(accounts: &[AccountInfo], data: &[u8]
 
     let seeds = [(b"proposal"), multisig_account.key().as_slice()];
     let proposal_seeds = &seeds[..];
-    let (proposal_pda, bump) = pubkey::find_program_address(proposal_seeds, &crate::ID);
+    let (proposal_pda, proposal_bump) = pubkey::find_program_address(proposal_seeds, &crate::ID);
     if proposal_pda.ne(proposal_account.key()) {
         return Err(ProgramError::InvalidAccountOwner);
     }
 
-    let bump_bytes = [bump];
+    let bump_bytes = [proposal_bump];
 
-    if proposal_account.owner() != &crate::ID {
-        let rent = Rent::from_account_info(rent_sysvar_acc)?;
-        let cpi_seed = [
-            Seed::from(b"proposal"),
-            Seed::from(multisig_account.key().as_ref()),
-            Seed::from(&bump_bytes[..]),
-        ];
-        let cpi_signer = Signer::from(&cpi_seed[..]);
+    let rent = Rent::from_account_info(rent)?;
+    let signer_seeds = [
+        Seed::from(b"proposal"),
+        Seed::from(multisig_account.key().as_ref()),
+        Seed::from(&bump_bytes[..]),
+    ];
 
-        pinocchio_system::instructions::CreateAccount {
-            from: creator,
-            to: proposal_account,
-            lamports: rent.minimum_balance(ProposalState::LEN),
-            space: ProposalState::LEN as u64,
-            owner: &crate::ID,
-        }
-        .invoke_signed(&[cpi_signer])?;
-    } else {
-        return Err(ProgramError::AccountAlreadyInitialized);
-    }
+    create_pda_account::<ProposalState>(&creator, &proposal_account, &signer_seeds, &rent)?;
 
     let proposal = ProposalState::from_account_info(proposal_account)?;
-    proposal.bump = bump;
+    proposal.bump = proposal_bump;
 
-    proposal.new(0, 0, ProposalStatus::Draft, bump, members, [0; 10], 0);
+    proposal.new(
+        0,
+        0,
+        ProposalStatus::Draft,
+        proposal_bump,
+        members,
+        [0; 10],
+        0,
+    );
 
     Ok(())
 }

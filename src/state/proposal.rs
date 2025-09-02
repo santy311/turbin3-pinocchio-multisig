@@ -1,3 +1,4 @@
+use crate::helper::account_init::StateDefinition;
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
 #[repr(C)]
@@ -19,9 +20,12 @@ pub struct ProposalState {
     // analysis period
 }
 
-impl ProposalState {
-    pub const LEN: usize = 8 + 8 + 1 + 1 + 32 * 10 + 32 * 10 + 32 * 10 + 8; // Adjust size as needed
+impl StateDefinition for ProposalState {
+    const LEN: usize = core::mem::size_of::<ProposalState>();
+    const SEED: &'static str = "proposal";
+}
 
+impl ProposalState {
     pub fn from_account_info_unchecked(account_info: &AccountInfo) -> &mut Self {
         unsafe { &mut *(account_info.borrow_mut_data_unchecked().as_ptr() as *mut Self) }
     }
