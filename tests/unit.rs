@@ -162,8 +162,8 @@ fn test_create_proposal() {
     println!("proposal_bump: {}", proposal_bump);
 
     let create_proposal_data = vec![
-        vec![2],                              // discriminator (CreateProposal)
-        proposal_bump.to_le_bytes().to_vec(), // proposal bump
+        vec![2], // discriminator (CreateProposal)
+        // proposal_bump.to_le_bytes().to_vec(), // proposal bump
         fee_payer_pubkey.to_bytes().to_vec(), // creator
         fee_payer_pubkey.to_bytes().to_vec(),
         fee_payer_pubkey.to_bytes().to_vec(), // 3 accounts used as multisig has 3 members in this test

@@ -1,5 +1,5 @@
 use crate::{
-    helper::create_pda_account,
+    helper::{check_signer, create_pda_account},
     state::{
         multisig::MultisigState,
         proposal::{self, ProposalState, ProposalStatus},
@@ -19,6 +19,7 @@ pub fn process_create_proposal_instruction(accounts: &[AccountInfo], data: &[u8]
     let [creator, proposal_account, multisig_account, rent, _remaining @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+    check_signer(&creator)?;
 
     let multisig = MultisigState::from_account_info(multisig_account)?;
 
@@ -30,7 +31,7 @@ pub fn process_create_proposal_instruction(accounts: &[AccountInfo], data: &[u8]
     let total_members = multisig.num_members as usize;
     let mut members = [Pubkey::default(); MAX_MEMBERS];
 
-    let mut offset = 2;
+    let mut offset = 1;
     for i in 0..total_members.min(MAX_MEMBERS) {
         let pubkey_bytes = &data[offset..offset + 32];
         let member =
