@@ -1,12 +1,14 @@
 use crate::helper::account_init::StateDefinition;
+use bytemuck::{Pod, Zeroable};
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
+#[derive(Pod, Zeroable, Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct ProposalState {
     pub proposal_id: u64, // Unique identifier for the proposal
     pub expiry: u64,      // Adjust size as needed is it needed here?
-    pub result: ProposalStatus,
-    pub bump: u8,                     // Bump seed for PDA
+    pub created_time: u64,
+    // analysis period
     pub active_members: [Pubkey; 10], // Array to hold active members, adjust size as needed
 
     //VOTE 0 - NOT VOTED
@@ -14,10 +16,10 @@ pub struct ProposalState {
     //VOTE 2 - AGAINST
     //VOTE 3 - ABSTAIN
     pub votes: [u8; 10],
-
     // imo slot
-    pub created_time: u64,
-    // analysis period
+    pub result: u8,
+    pub bump: u8,          // Bump seed for PDA
+    pub _padding: [u8; 4], // padding to reach multiple of 8
 }
 
 impl StateDefinition for ProposalState {
@@ -39,6 +41,8 @@ impl ProposalState {
         Ok(Self::from_account_info_unchecked(account_info))
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ProposalStatus {
     Draft = 0,
@@ -73,15 +77,13 @@ impl ProposalState {
         active_members: [Pubkey; 10],
         votes: [u8; 10],
         created_time: u64,
-    ) -> Self {
-        Self {
-            proposal_id,
-            expiry,
-            result,
-            bump,
-            active_members,
-            votes,
-            created_time,
-        }
+    ) {
+        self.proposal_id = proposal_id;
+        self.expiry = expiry;
+        self.created_time = created_time;
+        self.active_members = active_members;
+        self.votes = votes;
+        self.result = result as u8;
+        self.bump = bump;
     }
 }
