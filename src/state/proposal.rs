@@ -9,7 +9,7 @@ pub struct ProposalState {
     pub expiry: u64,      // Adjust size as needed is it needed here?
     pub created_time: u64,
     // analysis period
-    pub active_members: [Pubkey; 10], // Array to hold active members, adjust size as needed
+    // pub active_members: [Pubkey; 10], // Array to hold active members, adjust size as needed
 
     //VOTE 0 - NOT VOTED
     //VOTE 1 - FOR
@@ -74,14 +74,14 @@ impl ProposalState {
         expiry: u64,
         result: ProposalStatus,
         bump: u8,
-        active_members: [Pubkey; 10],
+        // active_members: [Pubkey; 10],
         votes: [u8; 10],
         created_time: u64,
     ) {
         self.proposal_id = proposal_id;
         self.expiry = expiry;
         self.created_time = created_time;
-        self.active_members = active_members;
+        // self.active_members = active_members;
         self.votes = votes;
         self.result = result as u8;
         self.bump = bump;
