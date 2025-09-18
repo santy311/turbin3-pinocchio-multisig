@@ -1,6 +1,9 @@
+pub mod add_member;
 pub mod create_proposal;
 pub mod create_transaction;
 pub mod init_multisig;
+pub mod remove_member;
+pub mod update_members;
 pub mod update_multisig;
 
 pub use create_proposal::*;
