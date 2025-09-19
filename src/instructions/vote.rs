@@ -1,5 +1,4 @@
 use crate::helper::account_init::StateDefinition;
-use crate::helper::DataLen;
 use crate::state::{member::MemberState, multisig::MultisigState, proposal::ProposalState};
 use pinocchio::{
     account_info::AccountInfo,
@@ -7,8 +6,9 @@ use pinocchio::{
     sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
+use pinocchio_system::instructions::Transfer;
 
-use pinocchio::msg;
+use crate::helper::utils::DataLen;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, shank::ShankType)]
@@ -65,7 +65,6 @@ pub fn process_vote_instruction(accounts: &[AccountInfo], data: &[u8]) -> Progra
     }
 
     if member_exists.is_none() {
-        // Member not a part of the multisig
         return Err(ProgramError::InvalidInstructionData);
     }
 
@@ -82,13 +81,6 @@ pub fn process_vote_instruction(accounts: &[AccountInfo], data: &[u8]) -> Progra
     for (i, vote) in votes.chunks_exact(32).enumerate() {
         if let Some(member) = member_exists {
             if vote == member.pubkey.as_ref() {
-                if i < proposal.yes_votes as usize && ix_data.vote == 1 {
-                    // Already voted yes
-                    return Err(ProgramError::InvalidInstructionData);
-                } else if proposal.yes_votes as usize <= i && ix_data.vote == 0 {
-                    // Already voted no
-                    return Err(ProgramError::InvalidInstructionData);
-                }
                 voted = true;
                 vote_index = i;
                 break;
@@ -101,100 +93,99 @@ pub fn process_vote_instruction(accounts: &[AccountInfo], data: &[u8]) -> Progra
         if ix_data.vote == 1 {
             // replace the last yes vote with current vote and reduce the yes vote count and increase the no vote count
             let vote_start = vote_index * 32;
-            let swap_start = proposal.yes_votes as usize * 32;
+            let swap_start = (proposal.yes_votes as usize) * 32;
 
-            if vote_start < swap_start {
-                let (left, right) = votes.split_at_mut(swap_start);
-                left[vote_start..vote_start + 32].swap_with_slice(&mut right[0..32]);
-            } else {
-                let (left, right) = votes.split_at_mut(vote_start);
-                left[swap_start..swap_start + 32].swap_with_slice(&mut right[0..32]);
-            }
-
-            proposal.yes_votes -= 1;
-            proposal.no_votes += 1;
-        } else {
-            // replace the last no vote with current vote and increase the yes vote count and reduce the no vote count
-            let vote_start = vote_index * 32;
-            let swap_start = proposal.no_votes as usize * 32;
-
-            if vote_start < swap_start {
-                let (left, right) = votes.split_at_mut(swap_start);
-                left[vote_start..vote_start + 32].swap_with_slice(&mut right[0..32]);
-            } else {
-                let (left, right) = votes.split_at_mut(vote_start);
-                left[swap_start..swap_start + 32].swap_with_slice(&mut right[0..32]);
+            if vote_start != swap_start {
+                // Use temporary variable to avoid borrowing issues
+                let mut temp_vote = [0u8; 32];
+                temp_vote.copy_from_slice(&votes[vote_start..vote_start + 32]);
+                let swap_data = votes[swap_start..swap_start + 32].to_vec();
+                votes[vote_start..vote_start + 32].copy_from_slice(&swap_data);
+                votes[swap_start..swap_start + 32].copy_from_slice(&temp_vote);
             }
 
             proposal.yes_votes += 1;
             proposal.no_votes -= 1;
+        } else {
+            // replace the last no vote with current vote and increase the yes vote count and reduce the no vote count
+            let vote_start = vote_index * 32;
+            let swap_start = (proposal.no_votes + proposal.yes_votes - 1) as usize * 32;
+
+            if vote_start != swap_start {
+                // Use temporary variable to avoid borrowing issues
+                let mut temp_vote = [0u8; 32];
+                temp_vote.copy_from_slice(&votes[vote_start..vote_start + 32]);
+                let swap_data = votes[swap_start..swap_start + 32].to_vec();
+                votes[vote_start..vote_start + 32].copy_from_slice(&swap_data);
+                votes[swap_start..swap_start + 32].copy_from_slice(&temp_vote);
+            }
+
+            proposal.yes_votes -= 1;
+            proposal.no_votes += 1;
+        }
+
+        unsafe {
+            proposal_account.borrow_mut_data_unchecked()[..ProposalState::LEN]
+                .copy_from_slice(proposal.to_bytes().as_ref());
+            proposal_account.borrow_mut_data_unchecked()[ProposalState::LEN..]
+                .copy_from_slice(&votes);
         }
     } else {
-        msg!("dbg1");
         // Increase the size of the account to add new vote
         let new_size = proposal_account.data_len() + 32;
         let rent_diff = Rent::get()?.minimum_balance(new_size) - proposal_account.lamports();
 
-        msg!("dbg2");
-
-        unsafe {
-            *voter.borrow_mut_lamports_unchecked() -= rent_diff;
-            *proposal_account.borrow_mut_lamports_unchecked() += rent_diff;
+        if rent_diff > 0 {
+            Transfer {
+                from: voter,
+                to: proposal_account,
+                lamports: rent_diff,
+            }
+            .invoke()?;
         }
 
-        msg!("dbg3");
-
         proposal_account.resize(new_size)?;
-
-        msg!("dbg4");
-
         let (new_proposal, new_votes) = unsafe {
             proposal_account
                 .borrow_mut_data_unchecked()
                 .split_at_mut_unchecked(ProposalState::LEN)
         };
 
-        msg!("dbg5");
-
-        // Update the proposal data directly
-        let proposal_ptr = new_proposal.as_mut_ptr() as *mut ProposalState;
-
-        msg!("dbg6");
-
-        unsafe {
-            *proposal_ptr = proposal;
-        }
-
-        msg!("dbg7");
+        let mut new_proposal_data = ProposalState::from_bytes(new_proposal)?;
 
         if let Some(member) = member_exists {
+            let last_vote_start = (proposal.yes_votes + proposal.no_votes) as usize * 32;
+
+            new_votes[last_vote_start..last_vote_start + 32]
+                .copy_from_slice(member.pubkey.as_ref());
+
             if ix_data.vote == 1 {
-                // swap the last yes vote with first no vote
-                msg!("dbg8");
-                let yes_start = proposal.yes_votes as usize * 32;
-                let no_start = proposal.no_votes as usize * 32;
-
-                if yes_start < no_start {
-                    msg!("dbg9");
-                    let (left, right) = new_votes.split_at_mut(no_start);
-                    left[yes_start..yes_start + 32].swap_with_slice(&mut right[0..32]);
-                } else {
-                    msg!("dbg10");
-                    let (left, right) = new_votes.split_at_mut(yes_start);
-                    left[no_start..no_start + 32].swap_with_slice(&mut right[0..32]);
+                if proposal.no_votes > 0 {
+                    let no_start = proposal.no_votes as usize * 32;
+                    // Swap the new vote (at the end) with the first no vote
+                    if last_vote_start != no_start {
+                        // Use temporary variables to avoid borrowing issues
+                        let mut temp_vote = [0u8; 32];
+                        temp_vote.copy_from_slice(&new_votes[no_start..no_start + 32]);
+                        let new_vote_data =
+                            new_votes[last_vote_start..last_vote_start + 32].to_vec();
+                        new_votes[no_start..no_start + 32].copy_from_slice(&new_vote_data);
+                        new_votes[last_vote_start..last_vote_start + 32]
+                            .copy_from_slice(&temp_vote);
+                    }
                 }
-
-                msg!("dbg11");
-
-                proposal.yes_votes += 1;
+                new_proposal_data.yes_votes += 1;
             } else {
                 // Add the new no vote
-                msg!("dbg12");
-                let no_start = proposal.no_votes as usize * 32;
-                new_votes[no_start..no_start + 32].copy_from_slice(member.pubkey.as_ref());
-                proposal.no_votes += 1;
-                msg!("dbg13");
+                new_proposal_data.no_votes += 1;
             }
+        }
+
+        unsafe {
+            proposal_account.borrow_mut_data_unchecked()[..ProposalState::LEN]
+                .copy_from_slice(new_proposal_data.to_bytes().as_ref());
+            proposal_account.borrow_mut_data_unchecked()[ProposalState::LEN..]
+                .copy_from_slice(&new_votes);
         }
     }
 

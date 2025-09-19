@@ -3,7 +3,10 @@ use litesvm::{
     LiteSVM,
 };
 use pinocchio_multisig::{
-    helper::StateDefinition, instructions::CreateProposalIxData, state::ProposalState, ID,
+    helper::StateDefinition,
+    instructions::{CreateProposalIxData, VoteIxData},
+    state::ProposalState,
+    ID,
 };
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -13,10 +16,10 @@ use solana_sdk::{
     signer::Signer,
     system_program,
     sysvar::rent,
-    transaction::{Transaction, VersionedTransaction},
+    transaction::VersionedTransaction,
 };
 
-use pinocchio_multisig::helper::utils::{to_bytes, to_mut_bytes};
+use pinocchio_multisig::helper::utils::to_bytes;
 use pinocchio_multisig::instructions::InitMultisigIxData;
 
 pub fn setup_svm_and_program() -> (LiteSVM, Keypair, Keypair, Pubkey) {
@@ -30,7 +33,7 @@ pub fn setup_svm_and_program() -> (LiteSVM, Keypair, Keypair, Pubkey) {
         .unwrap();
 
     let second_keypair = Keypair::new();
-    svm.airdrop(&second_keypair.pubkey(), 100000000).unwrap();
+    svm.airdrop(&second_keypair.pubkey(), 1000000000).unwrap();
 
     (svm, fee_payer, second_keypair, program_id)
 }
@@ -57,42 +60,46 @@ pub fn create_multisig(
     svm: &mut LiteSVM,
     fee_payer: &Keypair,
     program_id: Pubkey,
-    second_admin: Pubkey,
+    admins: Vec<Pubkey>,
 ) -> (Pubkey, u8) {
     let multisig_seed = [(b"multisig"), &0u16.to_le_bytes() as &[u8]];
     let (pda_multisig, multisig_bump) = Pubkey::find_program_address(&multisig_seed, &program_id);
     let treasury_seed = [(b"treasury"), pda_multisig.as_ref()];
     let treasury_seeds = &treasury_seed[..];
-    let (pda_treasury, treasury_bump) = Pubkey::find_program_address(treasury_seeds, &program_id);
+    let (pda_treasury, _treasury_bump) = Pubkey::find_program_address(treasury_seeds, &program_id);
     let init_multisig = InitMultisigIxData {
         max_expiry: 1_000_000,
         primary_seed: 0,
         min_threshold: 2,
-        num_members: 1,
-        num_admins: 1,
+        num_members: admins.len() as u8,
+        num_admins: admins.len() as u8,
     };
 
     let mut ix_data = vec![0u8];
 
     ix_data.extend_from_slice(unsafe { to_bytes(&init_multisig) });
 
+    let mut accounts = vec![
+        AccountMeta::new(fee_payer.pubkey(), true),
+        AccountMeta::new(pda_multisig, false),
+        AccountMeta::new(pda_treasury, false),
+        AccountMeta::new(rent::ID, false),
+        AccountMeta::new(system_program::ID, false),
+    ];
+    let admins_accounts = admins
+        .iter()
+        .map(|admin| AccountMeta::new(admin.clone(), false))
+        .collect::<Vec<AccountMeta>>();
+    accounts.extend(admins_accounts);
+
     let init_ix = Instruction {
         program_id: Pubkey::from(ID),
-        accounts: vec![
-            AccountMeta::new(fee_payer.pubkey(), true),
-            AccountMeta::new(pda_multisig, false),
-            AccountMeta::new(pda_treasury, false),
-            AccountMeta::new(rent::ID, false),
-            AccountMeta::new(system_program::ID, false),
-            AccountMeta::new(second_admin, false),
-        ],
+        accounts: accounts,
         data: ix_data,
     };
 
     let result = build_and_send_transaction(svm, fee_payer, vec![init_ix]);
     assert!(result.is_ok());
-
-    println!("Created Multisig PDA: {:?}", pda_multisig);
 
     (pda_multisig, multisig_bump)
 }
@@ -133,7 +140,46 @@ pub fn create_proposal(
 
     let result = build_and_send_transaction(svm, fee_payer, vec![create_proposal_ix]);
     assert!(result.is_ok());
-    println!("Created Proposal PDA: {:?}", pda_proposal);
+    // println!("Created Proposal PDA: {:?}", pda_proposal);
 
     (pda_proposal, proposal_bump)
+}
+
+pub fn vote(
+    svm: &mut LiteSVM,
+    fee_payer: &Keypair,
+    program_id: Pubkey,
+    multisig_pda: Pubkey,
+    multisig_bump: u8,
+    proposal_pda: Pubkey,
+    proposal_bump: u8,
+    vote: u8,
+) -> (Pubkey, u8) {
+    let vote_ix = VoteIxData {
+        multisig_bump: multisig_bump,
+        proposal_bump: proposal_bump,
+        vote,
+    };
+
+    let mut ix_data = vec![3u8];
+    ix_data.extend_from_slice(unsafe { to_bytes(&vote_ix) });
+
+    let vote_ix = vec![Instruction {
+        program_id: program_id,
+        accounts: vec![
+            AccountMeta::new(fee_payer.pubkey(), true),
+            AccountMeta::new(multisig_pda, false),
+            AccountMeta::new(proposal_pda, false),
+            AccountMeta::new(rent::ID, false),
+            AccountMeta::new(system_program::ID, false),
+        ],
+        data: ix_data,
+    }];
+
+    let result = build_and_send_transaction(svm, fee_payer, vote_ix);
+    println!("Vote result: {:?}", result);
+    assert!(result.is_ok());
+    // println!("Voted on Proposal PDA: {:?}", proposal_pda);
+
+    (proposal_pda, proposal_bump)
 }

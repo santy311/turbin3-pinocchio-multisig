@@ -1172,36 +1172,3 @@ fn test_create_transaction_account_already_initialized() {
 
 //     println!("✅ Success: Multisig threshold correctly updated to 3!");
 // }
-
-#[test]
-pub fn test_vote() {
-    let (mut svm, fee_payer, second_admin, program_id) = common::setup_svm_and_program();
-    let (pda_multisig, _multisig_bump) =
-        common::create_multisig(&mut svm, &fee_payer, program_id, second_admin.pubkey());
-
-    let (pda_proposal, _proposal_bump) =
-        common::create_proposal(&mut svm, &second_admin, program_id, pda_multisig);
-
-    let vote_ix_data = VoteIxData {
-        multisig_bump: _multisig_bump,
-        proposal_bump: _proposal_bump,
-        vote: 1,
-    };
-
-    let mut data = vec![3u8];
-    data.extend_from_slice(unsafe { to_bytes(&vote_ix_data) });
-
-    let vote_ix = vec![Instruction {
-        program_id: program_id,
-        accounts: vec![
-            AccountMeta::new(second_admin.pubkey(), true),
-            AccountMeta::new(pda_multisig, false),
-            AccountMeta::new(pda_proposal, false),
-        ],
-        data: data,
-    }];
-
-    let result = common::build_and_send_transaction(&mut svm, &second_admin, vote_ix);
-    println!("vote result: {:?}", result);
-    assert!(result.is_ok());
-}

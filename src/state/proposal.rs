@@ -34,17 +34,17 @@ impl ProposalState {
     }
 
     pub fn validate_pda(
-        bump: u8,
         pda: &Pubkey,
         owner: &Pubkey,
         proposal_bump: u8,
+        proposal_primary_seed: u16,
     ) -> Result<(), ProgramError> {
         let seeds = &[
             ProposalState::SEED.as_bytes(),
             owner.as_slice(),
-            &proposal_bump.to_le_bytes(),
+            &proposal_primary_seed.to_le_bytes(),
         ];
-        let derived = pinocchio_pubkey::derive_address(seeds, Some(bump), &crate::ID);
+        let derived = pinocchio_pubkey::derive_address(seeds, Some(proposal_bump), &crate::ID);
         if derived != *pda {
             return Err(ProgramError::InvalidAccountOwner);
         }
@@ -70,6 +70,19 @@ impl ProposalState {
             no_votes: bytes[21],
             _padding: [0; 4],
         })
+    }
+
+    pub fn to_bytes(&self) -> [u8; Self::LEN] {
+        let mut bytes = [0u8; Self::LEN];
+        bytes[0..2].copy_from_slice(&self.proposal_id.to_le_bytes());
+        bytes[2..10].copy_from_slice(&self.expiry.to_le_bytes());
+        bytes[10..18].copy_from_slice(&self.created_time.to_le_bytes());
+        bytes[18] = self.status as u8;
+        bytes[19] = self.bump;
+        bytes[20] = self.yes_votes;
+        bytes[21] = self.no_votes;
+        bytes[22..26].copy_from_slice(&self._padding);
+        bytes
     }
 }
 
