@@ -49,6 +49,10 @@ pub fn process_vote_instruction(accounts: &[AccountInfo], data: &[u8]) -> Progra
     };
     let ix_data = VoteIxData::from_bytes(data)?;
 
+    if proposal_account.owner() != &crate::ID {
+        return Err(ProgramError::IllegalOwner);
+    }
+
     let (_, members) = unsafe {
         multisig_account
             .borrow_mut_data_unchecked()
