@@ -23,6 +23,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, shank::ShankType)]
 pub struct CreateTransactionIxData {
     pub transaction_index: u64,  // 8 bytes
+    pub primary_seed: u16,       // 2 bytes
     pub tx_buffer: [u8; 512],    // 512 bytes
     pub buffer_size: u16,        // 2 bytes
 }
@@ -51,7 +52,7 @@ pub fn process_create_transaction(accounts: &[AccountInfo], data: &[u8]) -> Prog
     let rent = Rent::from_account_info(sysvar_rent_acc)?;
 
     let ix_data = unsafe { load_ix_data::<CreateTransactionIxData>(&data)? };
-    let seeds = &[TransactionState::SEED.as_bytes(), payer.key()];
+    let seeds = &[TransactionState::SEED.as_bytes(), &ix_data.primary_seed.to_le_bytes()];
 
     let (derived_transaction_pda, bump) = pubkey::find_program_address(seeds, &crate::ID);
 
@@ -60,9 +61,10 @@ pub fn process_create_transaction(accounts: &[AccountInfo], data: &[u8]) -> Prog
     }
 
     let bump_bytes = [bump];
+    let primary_seed_bytes = ix_data.primary_seed.to_le_bytes();
     let signer_seeds = [
         Seed::from(TransactionState::SEED.as_bytes()),
-        Seed::from(payer.key()),
+        Seed::from(&primary_seed_bytes),
         Seed::from(&bump_bytes[..]),
     ];
 
